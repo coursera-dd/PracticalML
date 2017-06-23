@@ -1,0 +1,98 @@
+---
+title: "Prediction Assignment Project"
+author: "Daniel Damian"
+date: "20 June 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE);
+```
+
+Let's start by loading the libraries and the data in. We observe that a number of supposedly numerical fields contain `#DIV/0!` as a value (someone has been using Excel) and we take care to consider these values as `NA` (even if possibly these could indicate something different than the non-value).
+
+```{r}
+library(ggplot2);library(grid);library(gridExtra);library(caret);library(klaR);
+trdata <- read.csv("Y:\\Learning\\PracticalMachineLearning\\pml-training.csv",na.strings = c('NA', '#DIV/0!'));
+tsdata <- read.csv("Y:\\Learning\\PracticalMachineLearning\\pml-testing.csv", na.strings = c('NA', '#DIV/0!'));
+```
+
+First, for some exploratory analyses, we can try to see some patterns in the data using several plots
+```{r}
+pgeom<-geom_point(alpha=0.3, size=0.3);
+p1<-ggplot(trdata, aes(x=roll_arm, y=pitch_arm, col=classe))+pgeom;
+p2<-ggplot(trdata, aes(x=accel_dumbbell_x, y=accel_dumbbell_y, col=classe))+pgeom;
+p3<-ggplot(trdata, aes(x=accel_belt_x, y=accel_belt_z, col=classe))+pgeom;
+p4<-ggplot(trdata, aes(x=roll_forearm, y=pitch_forearm, col=classe))+pgeom;
+grid.arrange(p1, p2, p3, p4, ncol=2, nrow=2);
+```
+
+We see that there are complex patterns at play, some that suggest that linear models may not be very useful. Also it's worth observing that measurements are taken in sequence, and it is the sequence of measurements that defines a pattern of correct or wrong movement (class).
+
+The task is however to provide instant input, therefore predict the class based on a single time point irrespective of the time window.
+
+To make analysis easier, we remove some variables that may introduce a skew. For instance, we notice that the rows are sorted in order of class, so in order to avoid a fake linearity being introduced by the row number we remove it. We also remove fields that have to do with the user, timestamp and time window. 
+
+We calculate a list of fields that we will remove from both data frames. This will include aggregated calculations that are available for time window rows only.
+
+```{r}
+trnames <- names(trdata);
+rtrNames <-c('X','user_name','raw_timestamp_part_1','raw_timestamp_part_2','cvtd_timestamp','new_window','num_window',trnames[grepl('kurtosis|skewness|max_|min_|amplitude_|var_|avg_|stddev_', trnames)])
+tsnames <- names(tsdata);
+rtsNames <-c('X','user_name','raw_timestamp_part_1','raw_timestamp_part_2','cvtd_timestamp','new_window','num_window',tsnames[grepl('kurtosis|skewness|max_|min_|amplitude_|var_|avg_|stddev_', tsnames)])
+```
+
+We recreate the training and test data removing the non-important names and we check that we don't have `NA` values.
+```{r}
+strdata <- trdata[, trnames[!(trnames %in% rtrNames)]];
+stsdata <- tsdata[, tsnames[!(tsnames %in% rtsNames)]];
+all(colSums(is.na(strdata))==0);
+all(colSums(is.na(stsdata))==0);
+```
+
+The `classe` variable is the prediction variable, we split the data into a training and a test
+```{r}
+set.seed(54321)
+inTrain <- createDataPartition(strdata$classe, p=0.7, list=FALSE);
+training <- strdata[inTrain, ];
+testing <- strdata[-inTrain, ];
+```
+
+We try first a few simple models - a Linear Discriminant Analysis after a PCA transformation, a Naive Bayes on a PCA transformation with 10 components and a naive Bayes on the original data set.
+```{r warning=FALSE}
+preproc <- preProcess(training[,-53], method="pca", pcaComp=10)
+trainingPC<-predict(preproc, training[,-53]);
+testingPC<-predict(preproc, testing[,-53]);
+ctrl <- trainControl(preProcOptions = list(thresh = 0.90));
+modlda    <- train(classe ~ ., method="lda", preProcess="pca", data=training, trControl = ctrl);
+modnbpca  <- NaiveBayes(training$classe ~ ., data=trainingPC);
+modnb     <- NaiveBayes(classe ~ ., data=training)
+```
+Let's check the obtained accuracy
+```{r warning=FALSE}
+print(confusionMatrix(testing$classe, predict(modlda,   testing))$overall['Accuracy']);
+print(confusionMatrix(testing$classe, predict(modnbpca, testingPC)$class)$overall['Accuracy']);
+print(confusionMatrix(testing$classe, predict(modnb,    testing)$class)$overall['Accuracy']);
+```
+Not that great - actually worse than by chance. These models are of not much use.
+
+We need to take another approach - we try random forests 
+
+```{r message=FALSE, warning=FALSE}
+control <- trainControl(method="cv", number=10, repeats=3)
+modrf <- train(classe ~ ., data=training, method="rf", ntree=100, trControl=control);
+cm <- confusionMatrix(testing$classe, predict(modrf,  testing));
+print(cm);
+```
+
+This looks a lot better - in fact this is as good as it gets. We did build the model with cross-validation to avoid over-fitting to the selected training set, and we repeated a few times. In fact, we tried several parameters for tree size and number of cross-validations, and results are fairly similar. Random Forests appear to be inherently suitable for this problem.
+
+The out-of-sample error is
+```{r}
+as.numeric(1-cm$overall['Accuracy']);
+```
+
+Finally we can print out the predictions
+```{r}
+predict(modrf,  stsdata);
+```
