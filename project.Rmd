@@ -2,7 +2,9 @@
 title: "Prediction Assignment Project"
 author: "Daniel Damian"
 date: "20 June 2017"
-output: html_document
+output: 
+  html_document: 
+    self_contained: no
 ---
 
 ```{r setup, include=FALSE}
@@ -58,6 +60,7 @@ training <- strdata[inTrain, ];
 testing <- strdata[-inTrain, ];
 ```
 
+## Testing some simple models
 We try first a few simple models - a Linear Discriminant Analysis after a PCA transformation, a Naive Bayes on a PCA transformation with 10 components and a naive Bayes on the original data set.
 ```{r warning=FALSE}
 preproc <- preProcess(training[,-53], method="pca", pcaComp=10)
@@ -76,6 +79,7 @@ print(confusionMatrix(testing$classe, predict(modnb,    testing)$class)$overall[
 ```
 Not that great - actually worse than by chance. These models are of not much use.
 
+## Better models - random forests with cross-validation
 We need to take another approach - we try random forests 
 
 ```{r message=FALSE, warning=FALSE}
@@ -92,6 +96,7 @@ The out-of-sample error is
 as.numeric(1-cm$overall['Accuracy']);
 ```
 
+## Predictions
 Finally we can print out the predictions
 ```{r}
 predict(modrf,  stsdata);
